@@ -17,7 +17,7 @@
 	 */
 	public interface MvpView {
 	}
-	
+
 </code>
 
 看doc 描述可有知道 mvpView 是作为父view 来管理所有的mvpView
@@ -233,3 +233,6 @@
 
 NoOp.of(Class clazz) // Dynamically proxy to generate a new object instance for a given class by using reflections
 用指定的class文件动态生成一个新的对象。
+
+
+##mvp 库 是对 common 库的继续封装。。。
