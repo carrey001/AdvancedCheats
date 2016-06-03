@@ -117,3 +117,103 @@ public Route next() throws IOException {
 
 ### RealConnection
 接下来我们再看这个对象。
+ 这个对象里面做了一些 底层的请求操作感兴趣的朋友可以自己看看。我们主要讲StreamAllocation中关于RealConnection 的几个方法。
+
+```
+
+ private RealConnection findHealthyConnection(int connectTimeout, int readTimeout,
+     int writeTimeout, boolean connectionRetryEnabled, boolean doExtensiveHealthChecks)
+     throws IOException, RouteException {
+   while (true) {
+     RealConnection candidate = findConnection(connectTimeout, readTimeout, writeTimeout,
+         connectionRetryEnabled);
+
+     // If this is a brand new connection, we can skip the extensive health checks.
+     synchronized (connectionPool) {
+       if (candidate.successCount == 0) {
+         return candidate;
+       }
+     }
+
+     // Otherwise do a potentially-slow check to confirm that the pooled connection is still good.
+     if (candidate.isHealthy(doExtensiveHealthChecks)) {
+       return candidate;
+     }
+
+     connectionFailed(new IOException());
+   }
+ }
+
+ /**
+  * Returns a connection to host a new stream. This prefers the existing connection if it exists,
+  * then the pool, finally building a new connection.
+  */
+ private RealConnection findConnection(int connectTimeout, int readTimeout, int writeTimeout,
+     boolean connectionRetryEnabled) throws IOException, RouteException {
+   Route selectedRoute;
+   synchronized (connectionPool) {
+     if (released) throw new IllegalStateException("released");
+     if (stream != null) throw new IllegalStateException("stream != null");
+     if (canceled) throw new IOException("Canceled");
+
+     RealConnection allocatedConnection = this.connection;
+     if (allocatedConnection != null && !allocatedConnection.noNewStreams) {
+       return allocatedConnection;
+     }
+
+     // Attempt to get a connection from the pool.
+     RealConnection pooledConnection = Internal.instance.get(connectionPool, address, this);
+     if (pooledConnection != null) {
+       this.connection = pooledConnection;
+       return pooledConnection;
+     }
+
+     selectedRoute = route;
+   }
+
+   if (selectedRoute == null) {
+     selectedRoute = routeSelector.next();
+     synchronized (connectionPool) {
+       route = selectedRoute;
+     }
+   }
+   RealConnection newConnection = new RealConnection(selectedRoute);
+   acquire(newConnection);
+
+   synchronized (connectionPool) {
+     Internal.instance.put(connectionPool, newConnection);
+     this.connection = newConnection;
+     if (canceled) throw new IOException("Canceled");
+   }
+
+   newConnection.connect(connectTimeout, readTimeout, writeTimeout, address.connectionSpecs(),
+       connectionRetryEnabled);
+   routeDatabase().connected(newConnection.route());
+
+   return newConnection;
+ }
+
+```
+这里有两个方法。findHealthyConnection 查找健康的链路 返回值是RealConnection.
+里面调用了findConnection的方法。
+因为从线程池里拿出来的链接。所以对线程池加了同步锁。
+判断当前connection是否为null 是否有新的流 如果没有 就返回当前链接。 如果没有，就 RealConnection pooledConnection = Internal.instance.get(connectionPool, address, this);
+
+这个方法中获取新的链接  如果 没有获取到 就新建个链接。
+
+
+
+### HttpStream
+Http流。这个对象会封装http 请求。 这个是一个接口。有两个实现类
+- Http2xStream
+- Http1xStream
+ 这个类封装了 请求的所有参数 还有返回的所有数据
+例如以下的方法。
+- createRequestBody
+- writeRequestHeaders
+- writeRequestBody
+- finishRequest
+- openResponseBody
+
+我们再这个地方才真正的创建http 请求参数。然后发送请求接受返回值。
+ 对于okHttp的使用方法。我会再接下来的博客中写来。
